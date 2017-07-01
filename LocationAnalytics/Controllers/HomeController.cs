@@ -13,9 +13,9 @@ namespace LocationAnalytics.Controllers
 {
     public class HomeController : Controller
     {
-        public ActionResult Index()
+        public async Task<ActionResult> Index()
         {
-            UploadData();
+            await UploadData();
             return View();
         }
 
@@ -33,26 +33,24 @@ namespace LocationAnalytics.Controllers
             return View();
         }
 
-        private JsonResult UploadData()
+        private async Task<JsonResult> UploadData()
         {
             var rooObject = LoadJson();
-            #region commented
-            //if (rooObject != null)
-            //{
-            //     saveDataInDB(rooObject, "abhishek");
-            //}
-            //Cluster cluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
-            //ISession session = cluster.Connect("locationsks");
 
-            //Row result = session.Execute("select * from locations where userName='abhishek'").First();
+            #region commented
+            if (rooObject != null)
+            {
+                var r = await saveDataInDB(rooObject, "abhishek");
+            }
             #endregion
+
             createFiles(rooObject);
             return Json(rooObject, JsonRequestBehavior.AllowGet);
         }
 
         private RootObject LoadJson()
         {
-            using (StreamReader r = new StreamReader(@"C:\Users\admin1\Downloads\takeout-20170701T041322Z-001\Takeout\Location History\Location History.json"))
+            using (StreamReader r = new StreamReader(@"C:\Users\admin1\Downloads\takeout-20170701T041322Z-001\Takeout\Location History\SmallSample.json"))
             {
                 using (JsonTextReader reader = new JsonTextReader(r))
                 {
@@ -67,17 +65,16 @@ namespace LocationAnalytics.Controllers
                     }
                 }
             }
-
             return null;
         }
 
         private void createFiles(RootObject rootobject)
         {
             rootobject.locations.Where(q => checkConditions(q.timestampMs, rootobject.locations.Count)).ToList();
-            var rers=Split(rootobject.locations);
+            var rers = Split(rootobject.locations);
         }
 
-        bool checkConditions(string timestampMs,int length)
+        bool checkConditions(string timestampMs, int length)
         {
             return false;
         }
@@ -96,19 +93,20 @@ namespace LocationAnalytics.Controllers
             return splits;
         }
 
-        private void saveDataInDB(RootObject data, string userName)
+        private async Task<object> saveDataInDB(RootObject data, string userName)
         {
-
-
             Cluster cluster = Cluster.Builder().AddContactPoints("127.0.0.1").Build();
             ISession session = cluster.Connect("locationsks");
 
-            Parallel.ForEach(data.locations, loc =>
+            var tasks = data.locations.Select(async loc =>
             {
                 var activityJson = String.Empty;
                 if (loc.activity != null)
                     activityJson = JsonConvert.SerializeObject(loc.activity);
-
+                RowSet r = session.Execute("select * from locations where timestampcol ='" + loc.timestampMs + "'");
+                if (r.Any())
+                    return;
+                
                 string insertQuery = @"insert into locations (timestampcol, username, latitude, longitude, accuracy, activityJson) 
                                   values ( '" + loc.timestampMs + "', '"
                                   + userName + "', '"
@@ -117,8 +115,12 @@ namespace LocationAnalytics.Controllers
                                   + loc.accuracy + ", '"
                                   + activityJson + "')";
 
-                session.Execute(insertQuery);
+                await session.ExecuteAsync(new SimpleStatement(insertQuery));
             });
+
+            await Task.WhenAll(tasks);
+
+            return this;
 
         }
     }
